@@ -24,6 +24,10 @@
 #include "timex.h"
 #include "ztimer.h"
 
+#include "board.h"
+#include "phydat.h"
+#include "saul_reg.h"
+
 #define TX_POWER_UNDEF (127)
 
 #define GAP_NAME_BUF_SIZE (300)
@@ -249,6 +253,85 @@ int _cmd_scan(int argc, char **argv)
 SHELL_COMMAND(scan,"trigger a BLE scan",_cmd_scan);
 SHELL_COMMAND(adv,"set advertised message",adv_cmd);
 
+char sensor_stack[THREAD_STACKSIZE_DEFAULT];
+
+#define ACC_SHAKE_THRESHOLD_MG (1000)
+#define LED_START_BRIGHTNESS   (20)
+#define LED_MAX_BRIGHTNESS     (255)
+
+void *sensor_thread_handler(void *arg)
+{
+    (void) arg; /* argument not used */
+
+    saul_reg_t *acc_sensor = saul_reg_find_type(SAUL_SENSE_ACCEL);
+
+    if (!acc_sensor) {
+        puts("No accellerometer found!");
+        return NULL;
+    }
+
+    saul_reg_t *rgb_led = saul_reg_find_type(SAUL_ACT_LED_RGB);
+
+    if (!rgb_led) {
+        puts("No RGB LED found!");
+        return NULL;
+    }
+
+    ztimer_now_t last_wakeup = ztimer_now(ZTIMER_MSEC);
+    phydat_t acc_old;
+    unsigned dimensions = saul_reg_read(acc_sensor, &acc_old);
+    if (dimensions < 1) {
+        return NULL;
+    }
+
+    unsigned shake_cnt = 0;
+
+    phydat_t rgb = { .val = { 0, 0, 0 } };
+
+    while (1) {
+        phydat_t acc;
+        dimensions = saul_reg_read(acc_sensor, &acc);
+        if (dimensions < 1) {
+            return NULL;
+        }
+
+        bool shaked = false;
+        for (unsigned d = 0; d < dimensions; d++) {
+            int diff = acc_old.val[d] - acc.val[d];
+            if (diff > ACC_SHAKE_THRESHOLD_MG ||
+                diff < -ACC_SHAKE_THRESHOLD_MG) {
+                shaked = true;
+            }
+        }
+
+        if (shaked) {
+            /* shaking event detected */
+            if (shake_cnt == 0) {
+                /*TODO: notify remote Node here */
+
+                /* when shaking starts add some offset so that the LED
+                 * stays on for some time before turning off again */
+                shake_cnt = LED_START_BRIGHTNESS;
+            }
+            if (shake_cnt < LED_MAX_BRIGHTNESS) {
+                shake_cnt++;
+            }
+            rgb.val[0] = shake_cnt;
+        } else {
+            if (shake_cnt >= 1) {
+                shake_cnt--;
+                rgb.val[0] = shake_cnt;
+                saul_reg_write(rgb_led, &rgb);
+            }
+        }
+
+        acc_old = acc;
+
+        /* wait for 100 ms */
+        ztimer_periodic_wakeup(ZTIMER_MSEC, &last_wakeup, 100);
+    }
+}
+
 int main(void)
 {
     /* Sleep so that we do not miss this message while connecting */
@@ -266,16 +349,16 @@ int main(void)
     nimble_scanner_cfg_t params = {
         .itvl_ms = SCAN_INTERVAL_MS,
         .win_ms = SCAN_WINDOW_MS,
-#if IS_USED(MODULE_NIMBLE_PHY_CODED)
-        .flags = NIMBLE_SCANNER_PHY_1M | NIMBLE_SCANNER_PHY_CODED,
-#else
         .flags = NIMBLE_SCANNER_PHY_1M,
-#endif
     };
 
     /* initialize the nimble scanner */
     nimble_scanner_init(&params, nimble_scan_evt_cb);
 
+    thread_create(sensor_stack, sizeof(sensor_stack),
+                  THREAD_PRIORITY_MAIN - 1,
+                  THREAD_CREATE_STACKTEST,
+                  sensor_thread_handler, NULL, "sensor");
 
     /* start shell */
     char line_buf[SHELL_DEFAULT_BUFSIZE];
