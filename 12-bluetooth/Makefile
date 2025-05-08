@@ -28,6 +28,10 @@ USEPKG += nimble
 # enable the extended advertisement feature of nimble
 USEMODULE += nimble_adv_ext
 
+# enable the scanner feature of NimBLE
+USEMODULE += nimble_scanner
+USEMODULE += nimble_addr
+
 # enable utility features for crafting advertisements
 USEMODULE += bluetil_ad
 

@@ -13,12 +13,31 @@
  * @author  Michel Rottleuthner <michel.rottleuthner@haw-hamburg.de>
  */
 #include <stdio.h>
-#include "ztimer.h"
-#include "shell.h"
+#include <stdlib.h>
 #include "host/util/util.h"
-#include "net/bluetil/ad.h"
-#include "nimble/ble.h"
 #include "host/ble_hs.h"
+#include "nimble_scanner.h"
+#include "nimble_addr.h"
+#include "nimble/ble.h"
+#include "net/bluetil/ad.h"
+#include "shell.h"
+#include "timex.h"
+#include "ztimer.h"
+
+#define TX_POWER_UNDEF (127)
+
+#define GAP_NAME_BUF_SIZE (300)
+#define ADV_PKT_BUFFER_SIZE (300)
+#define NIMBLE_INSTANCE (0)
+
+/* The scan window defines how long to listen on the currently
+ * configured advertisement channel. */
+#define SCAN_WINDOW_MS    30
+
+/* The scan interval defines how long to wait before starting the next
+ * scan window an the next advertisement channel. Setting the
+ * SCAN_INTERVAL_MS = SCAN_WINDOW_MS results in continuous scanning.*/
+#define SCAN_INTERVAL_MS    30
 
 static uint8_t id_addr_type;
 
@@ -39,10 +58,9 @@ static const uint8_t _custom_msd_marker_pattern[] = {
         0xf0, 0x9f, 0x93, 0x9f
 };
 
-#define TX_POWER_UNDEF (127)
-
-#define ADV_PKT_BUFFER_SIZE (300)
-#define NIMBLE_INSTANCE (0)
+/* payload offset within the custom marked  manufacturer specific data field */
+#define MSD_PAYLOAD_OFFS (sizeof(_company_id_code) + \
+                          sizeof(_custom_msd_marker_pattern))
 
 static uint8_t _payload_buf[ADV_PKT_BUFFER_SIZE];
 static unsigned _pl_len = 0;
@@ -134,7 +152,7 @@ static void start_adv(uint8_t *payload, unsigned payload_len)
     rc = ble_gap_ext_adv_start(NIMBLE_INSTANCE, 0, 0);
     assert (rc == 0);
 
-    printf("instance %u started (non-con non-scan)\n", NIMBLE_INSTANCE);
+    printf("Now advertising \"%s\"\n", payload);
 }
 
 int adv_cmd(int argc, char **argv)
@@ -144,9 +162,9 @@ int adv_cmd(int argc, char **argv)
         puts("usage: adv <message>");
         return 1;
     }
-
-    puts(argv[1]);
  
+    /* if advertising is already active stop it before updating
+     * the advertised content */
     if (ble_gap_ext_adv_active(NIMBLE_INSTANCE)) {
         ble_gap_ext_adv_stop(NIMBLE_INSTANCE);
     }
@@ -161,6 +179,74 @@ int adv_cmd(int argc, char **argv)
     return 0;
 }
 
+void _print_hex_arr(const uint8_t *data, unsigned len)
+{
+    printf("{");
+    for (unsigned i = 0; i < len; i++) {
+        printf(" 0x%02x%c", data[i], (i == len-1) ? ' ' : ',');
+    }
+    printf("}\n");
+}
+
+void nimble_scan_evt_cb(uint8_t type, const ble_addr_t *addr,
+                        const nimble_scanner_info_t *info,
+                        const uint8_t *ad, size_t len)
+{
+    assert(addr);
+    (void)type;
+    (void)info;
+    
+    /* ignore legacy advertisements */
+    if (!(type & NIMBLE_SCANNER_EXT_ADV)) {
+        return;
+    }
+    
+    bluetil_ad_t rec_ad;
+
+    /* drop const of ad with cast. Ensure read-only access */ 
+    uint8_t *ad_ro = (uint8_t*)ad;
+    bluetil_ad_init(&rec_ad, ad_ro, len, len);
+
+    char name[BLE_ADV_PDU_LEN + 1] = {0};
+    int res = bluetil_ad_find_str(&rec_ad, BLE_GAP_AD_NAME, 
+                                  name, sizeof(name));
+
+    printf("\n\"%s\" @", name);
+    nimble_addr_print(addr);
+    printf("sent %d bytes:\n", len);
+    _print_hex_arr(ad, len);
+    
+    bluetil_ad_data_t msd;
+    res = bluetil_ad_find(&rec_ad, BLE_GAP_AD_VENDOR, &msd);
+    if (res == BLUETIL_AD_OK) {
+        uint8_t *marker = &msd.data[sizeof(_company_id_code)];
+        if (memcmp(marker, _custom_msd_marker_pattern,
+                   sizeof(_custom_msd_marker_pattern)) == 0) {
+            uint8_t *payload = &msd.data[MSD_PAYLOAD_OFFS];
+            /* length of the payload without the marker */
+            int pl = msd.len - MSD_PAYLOAD_OFFS;
+            printf("%.*s\n", pl, payload);
+        }
+    }
+}
+
+int _cmd_scan(int argc, char **argv)
+{
+    if (argc == 2) {
+        if (strcmp("start", argv[1]) == 0) {
+            nimble_scanner_start();
+            return 0;
+        } else if (strcmp("stop", argv[1]) == 0) {
+            nimble_scanner_stop();
+            return 0;
+        }
+    }
+
+    printf("usage: %s start|stop\n", argv[0]);
+    return 0;
+}
+
+SHELL_COMMAND(scan,"trigger a BLE scan",_cmd_scan);
 SHELL_COMMAND(adv,"set advertised message",adv_cmd);
 
 int main(void)
@@ -176,6 +262,20 @@ int main(void)
     /* configure global address */
     rc = ble_hs_id_infer_auto(0, &id_addr_type);
     assert(rc == 0);
+
+    nimble_scanner_cfg_t params = {
+        .itvl_ms = SCAN_INTERVAL_MS,
+        .win_ms = SCAN_WINDOW_MS,
+#if IS_USED(MODULE_NIMBLE_PHY_CODED)
+        .flags = NIMBLE_SCANNER_PHY_1M | NIMBLE_SCANNER_PHY_CODED,
+#else
+        .flags = NIMBLE_SCANNER_PHY_1M,
+#endif
+    };
+
+    /* initialize the nimble scanner */
+    nimble_scanner_init(&params, nimble_scan_evt_cb);
+
 
     /* start shell */
     char line_buf[SHELL_DEFAULT_BUFSIZE];
