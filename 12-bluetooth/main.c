@@ -122,6 +122,9 @@ static void start_adv(uint8_t *payload, unsigned payload_len)
     params.secondary_phy = BLE_HCI_LE_PHY_1M;
     params.tx_power = TX_POWER_UNDEF;
     params.sid = 0;
+    /* min/max advertising interval converted from ms to 0.625ms units */
+    params.itvl_min = BLE_GAP_ADV_ITVL_MS(600);
+    params.itvl_max = BLE_GAP_ADV_ITVL_MS(800);
 
     /* configure the nimble instance */
     rc = ble_gap_ext_adv_configure(NIMBLE_INSTANCE, &params, NULL, NULL, NULL);
