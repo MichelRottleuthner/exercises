@@ -73,6 +73,7 @@ static void _ad_append(bluetil_ad_t *ad, const uint8_t *data, unsigned len)
     }
 }
 
+/* [TASK 2.4: add function to configure advertisements with a custom payload] */
 /* hand-craft a manufacturer specific data type with a custom marker
  * at the start of the data */
 static void _ad_append_marked_msd_payload(bluetil_ad_t *ad, const uint8_t *payload, unsigned len)
@@ -97,8 +98,10 @@ static void _ad_append_marked_msd_payload(bluetil_ad_t *ad, const uint8_t *paylo
     _ad_append(ad, payload, len);
 }
 
+/* [TASK 2.1: add function to configure advertisements with a custom payload] */
 static void start_adv(uint8_t *payload, unsigned payload_len)
 {
+    /* [TASK 2.2: Initialize data structures and configure advertisement parameters] */
     /* buffer for the advertisement */
     static uint8_t adv_buf[ADV_PKT_BUFFER_SIZE];
     struct os_mbuf *data;
@@ -126,6 +129,7 @@ static void start_adv(uint8_t *payload, unsigned payload_len)
     rc = ble_gap_ext_adv_configure(NIMBLE_INSTANCE, &params, NULL, NULL, NULL);
     assert (rc == 0);
 
+    /* [TASK 2.3: Create a new advertisement packet] */
     /* get mbuf for adv data */
     data = os_msys_get_pkthdr(ADV_PKT_BUFFER_SIZE, 0);
     assert(data);
@@ -141,7 +145,8 @@ static void start_adv(uint8_t *payload, unsigned payload_len)
     rc = bluetil_ad_add_name(&ad, adv_name);
     assert(rc == BLUETIL_AD_OK);
  
-    /* Add a manufacturer spcific data entry with custom marker. */
+    /* [TASK 2.4: Append a manufacturer specific data type] */
+    /* Add a manufacturer specific data entry with custom marker. */
     _ad_append_marked_msd_payload(&ad, payload, payload_len);
 
     /* fill mbuf with adv data */
@@ -151,14 +156,14 @@ static void start_adv(uint8_t *payload, unsigned payload_len)
     rc = ble_gap_ext_adv_set_data(NIMBLE_INSTANCE, data);
     assert (rc == 0);
 
-    /* start advertising */
+    /* [TASK 2.3: Start advertising] */
     rc = ble_gap_ext_adv_start(NIMBLE_INSTANCE, 0, 0);
     assert (rc == 0);
 
     printf("Now advertising \"%s\"\n", payload);
 }
 
-int adv_cmd(int argc, char **argv)
+int cmd_adv(int argc, char **argv)
 {
     /* check that the command is called correctly */
     if (argc != 2) {
@@ -191,6 +196,7 @@ void _print_hex_arr(const uint8_t *data, unsigned len)
     printf("}\n");
 }
 
+/* [TASK 1.2: Implement a custom callback for scan events] */
 void nimble_scan_evt_cb(uint8_t type, const ble_addr_t *addr,
                         const nimble_scanner_info_t *info,
                         const uint8_t *ad, size_t len)
@@ -199,14 +205,15 @@ void nimble_scan_evt_cb(uint8_t type, const ble_addr_t *addr,
     (void)type;
     (void)info;
     
+    /* [TASK 3.1: filter for extended advertisements only] */
     /* ignore legacy advertisements */
     if (!(type & NIMBLE_SCANNER_EXT_ADV)) {
         return;
     }
     
+    /* [TASK 1.3: parse the name of advertised devices] */
     bluetil_ad_t rec_ad;
-
-    /* drop const of ad with cast. Ensure read-only access */ 
+    /* drop const of ad with cast. Ensure read-only access! */
     uint8_t *ad_ro = (uint8_t*)ad;
     bluetil_ad_init(&rec_ad, ad_ro, len, len);
 
@@ -214,11 +221,16 @@ void nimble_scan_evt_cb(uint8_t type, const ble_addr_t *addr,
     int res = bluetil_ad_find_str(&rec_ad, BLE_GAP_AD_NAME, 
                                   name, sizeof(name));
 
-    printf("\n\"%s\" @", name);
+    /* [TASK 1.4: Output name, address, and data of the advertisement] */
+    if (res == BLUETIL_AD_OK) {
+        printf("\n\"%s\" @", name);
+    }
+
     nimble_addr_print(addr);
     printf("sent %d bytes:\n", len);
     _print_hex_arr(ad, len);
     
+    /* [TASK 3.2: output our payload marked by our custom byte pattern] */
     bluetil_ad_data_t msd;
     res = bluetil_ad_find(&rec_ad, BLE_GAP_AD_VENDOR, &msd);
     if (res == BLUETIL_AD_OK) {
@@ -233,7 +245,8 @@ void nimble_scan_evt_cb(uint8_t type, const ble_addr_t *addr,
     }
 }
 
-int _cmd_scan(int argc, char **argv)
+/* [TASK 1.5: add a shell command to start and stop scanning] */
+int cmd_scan(int argc, char **argv)
 {
     if (argc == 2) {
         if (strcmp("start", argv[1]) == 0) {
@@ -266,13 +279,14 @@ int main(void)
     rc = ble_hs_id_infer_auto(0, &id_addr_type);
     assert(rc == 0);
 
+    /* [TASK 1.1: initialize the nimble scanner ] */
     nimble_scanner_cfg_t params = {
         .itvl_ms = SCAN_INTERVAL_MS,
         .win_ms = SCAN_WINDOW_MS,
         .flags = NIMBLE_SCANNER_PHY_1M,
     };
 
-    /* initialize the nimble scanner */
+    /* initialize the scanner and set up our own callback */
     nimble_scanner_init(&params, nimble_scan_evt_cb);
 
     /* start shell */
