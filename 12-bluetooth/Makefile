@@ -35,12 +35,6 @@ USEMODULE += nimble_addr
 # enable utility features for crafting advertisements
 USEMODULE += bluetil_ad
 
-# include and auto-initialize all available sensors
-USEMODULE += saul_default
-
-# include shell command to interact with the sensors
-USEMODULE += shell_cmd_saul_reg
-
 # configure some buffersizes of NimBLE to support larger packet sizes
 MSYS_CNT ?= 20
 CFLAGS += -DMYNEWT_VAL_BLE_LL_MAX_PKT_SIZE=251
