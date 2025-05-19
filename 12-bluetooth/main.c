@@ -48,13 +48,13 @@ const char adv_name[] = "RIOT-ext-adv";
  * the Bluetooth SIG. 
  * For testing purposes we use 0xFFFF as an unassigned identifier code.
  */
-static const uint8_t _company_id_code[] = { 0xFF, 0xFF };
+const uint8_t _company_id_code[] = { 0xFF, 0xFF };
 
 /* We use the manufacturer specific data type to transmit arbitrary data.
  * After the company ID we always put the same marker pattern to be able
  * to easily filter for these packets.
  */
-static const uint8_t _custom_msd_marker_pattern[] = {
+const uint8_t _custom_msd_marker_pattern[] = {
         0xf0, 0x9f, 0x93, 0x9f
 };
 
@@ -62,10 +62,11 @@ static const uint8_t _custom_msd_marker_pattern[] = {
 #define MSD_PAYLOAD_OFFS (sizeof(_company_id_code) + \
                           sizeof(_custom_msd_marker_pattern))
 
-static uint8_t _payload_buf[ADV_PKT_BUFFER_SIZE];
-static unsigned _pl_len = 0;
+/* buffer to store the advertised data in */
+uint8_t _payload_buf[ADV_PKT_BUFFER_SIZE];
+unsigned _pl_len = 0;
 
-static void _ad_append(bluetil_ad_t *ad, const uint8_t *data, unsigned len)
+void _ad_append(bluetil_ad_t *ad, const uint8_t *data, unsigned len)
 {
     if ((ad->pos + len) <= ad->size) {
         memcpy(&ad->buf[ad->pos], data, len);
