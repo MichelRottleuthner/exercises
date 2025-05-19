@@ -41,7 +41,7 @@
 
 static uint8_t id_addr_type;
 
-static const char adv_name[] = "Sense-M8";
+const char adv_name[] = "RIOT-ext-adv";
 
 /* The first two bytes of the manufacturer specific data type contain
  * a company ID code which for a final product must be requested from
